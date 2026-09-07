@@ -387,6 +387,10 @@ export function buildUpstreamHeaders(target: ProxyTarget, range?: string | null)
   if (target.headers?.referer) h.set('referer', target.headers.referer)
   if (target.headers?.origin) h.set('origin', target.headers.origin)
   if (target.headers?.cookie) h.set('cookie', target.headers.cookie)
+  if (target.headers?.clientIp) {
+    h.set('x-forwarded-for', target.headers.clientIp)
+    h.set('x-real-ip', target.headers.clientIp)
+  }
   if (range) h.set('range', range)
   return h
 }

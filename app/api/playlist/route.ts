@@ -105,6 +105,11 @@ export async function POST(request: Request) {
     }
     const playlistUrl = body.url.trim().replace(/\.+$/, '')
 
+    const clientIp =
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      request.headers.get('x-real-ip')?.trim() ||
+      undefined
+
     const userAgents = [
       DEFAULT_USER_AGENT,
       'OTT Navigator/1.6.8.5',
@@ -120,7 +125,7 @@ export async function POST(request: Request) {
     for (const ua of userAgents) {
       try {
         const fetched = await fetchUpstream({
-          target: { url: playlistUrl, headers: { userAgent: ua } },
+          target: { url: playlistUrl, headers: { userAgent: ua, clientIp } },
           policy: hostPolicy(),
           signal: request.signal,
         })

@@ -10,6 +10,7 @@ export interface StreamHeaders {
   referer?: string
   origin?: string
   cookie?: string
+  clientIp?: string
 }
 
 export interface DrmConfig {
