@@ -376,13 +376,14 @@ export function rewriteHlsManifest(
 // Upstream fetch
 // ---------------------------------------------------------------------------
 
-/** Providers commonly reject unrecognised clients but always accept VLC. */
-export const DEFAULT_USER_AGENT = 'VLC/3.0.20 LibVLC/3.0.20'
+/** Providers commonly reject unrecognised clients or VLC, but always accept TiviMate. */
+export const DEFAULT_USER_AGENT = 'TiviMate/4.7.0 (Linux; Android 11)'
 
 export function buildUpstreamHeaders(target: ProxyTarget, range?: string | null): Headers {
   const h = new Headers()
   h.set('user-agent', target.headers?.userAgent || DEFAULT_USER_AGENT)
   h.set('accept', '*/*')
+  h.set('accept-encoding', 'identity')
   if (target.headers?.referer) h.set('referer', target.headers.referer)
   if (target.headers?.origin) h.set('origin', target.headers.origin)
   if (target.headers?.cookie) h.set('cookie', target.headers.cookie)

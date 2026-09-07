@@ -179,12 +179,14 @@ test('an already-proxied line is left alone', () => {
   assert.ok(out.includes(inner))
 })
 
-test('upstream headers default to a VLC user agent and forward Range', () => {
+test('upstream headers default to an IPTV user agent, identity encoding, and forward Range', () => {
   const h = buildUpstreamHeaders({ url: 'http://h/a.mp4' }, 'bytes=100-200')
   assert.equal(h.get('user-agent'), DEFAULT_USER_AGENT)
+  assert.equal(h.get('accept-encoding'), 'identity')
   assert.equal(h.get('range'), 'bytes=100-200')
   const custom = buildUpstreamHeaders({ url: 'http://h/a', headers: { userAgent: 'Mine' } })
   assert.equal(custom.get('user-agent'), 'Mine')
+  assert.equal(custom.get('accept-encoding'), 'identity')
   assert.equal(custom.get('range'), null)
 })
 

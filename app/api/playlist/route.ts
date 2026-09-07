@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { hostPolicy } from '@/lib/env'
-import { ProxyError, fetchUpstream, redactUrl } from '@/lib/proxy'
+import { ProxyError, fetchUpstream, redactUrl, DEFAULT_USER_AGENT } from '@/lib/proxy'
 import { looksLikeM3U, parseM3U } from '@/lib/m3u'
 import { classifyEntries } from '@/lib/classify'
 import { XtreamError, importXtream, xtreamFromM3uUrl } from '@/lib/xtream'
@@ -105,19 +105,62 @@ export async function POST(request: Request) {
     }
     const playlistUrl = body.url.trim().replace(/\.+$/, '')
 
-    const { response } = await fetchUpstream({
-      target: { url: playlistUrl },
-      policy: hostPolicy(),
-      signal: request.signal,
-    })
-    if (!response.ok) {
+    const userAgents = [
+      DEFAULT_USER_AGENT,
+      'OTT Navigator/1.6.8.5',
+      'VLC/3.0.20 LibVLC/3.0.20',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+    ]
+
+    let response: Response | null = null
+    let finalUrl = playlistUrl
+    let text = ''
+    let lastErrorStatus: number | null = null
+
+    for (const ua of userAgents) {
+      try {
+        const fetched = await fetchUpstream({
+          target: { url: playlistUrl, headers: { userAgent: ua } },
+          policy: hostPolicy(),
+          signal: request.signal,
+        })
+        response = fetched.response
+        finalUrl = fetched.finalUrl
+        if (!response.ok) {
+          lastErrorStatus = response.status
+          continue
+        }
+        text = await readBounded(response)
+        if (looksLikeM3U(text)) {
+          break
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') throw err
+        // Try next candidate
+      }
+    }
+
+    if (!response || !response.ok) {
       return NextResponse.json(
-        { error: `The playlist server returned ${response.status}.` },
+        { error: `The playlist server returned ${lastErrorStatus ?? (response ? response.status : 502)}.` },
         { status: 502 },
       )
     }
-    const text = await readBounded(response)
+
     if (!looksLikeM3U(text)) {
+      if (finalUrl !== playlistUrl) {
+        try {
+          const redirectedHost = new URL(finalUrl).hostname
+          return NextResponse.json(
+            {
+              error: `The playlist server redirected to ${redirectedHost} which returned a non-playlist page. Check the link, or whether the subscription has expired.`,
+            },
+            { status: 422 },
+          )
+        } catch {
+          // fall through
+        }
+      }
       return NextResponse.json(
         {
           error:
