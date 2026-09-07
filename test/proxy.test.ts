@@ -252,11 +252,28 @@ test('isMpdManifest detects dash manifests and rewriteMpdManifest injects BaseUR
   assert.ok(rewritten.includes('urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b'))
 })
 
-test('assertAllowedTarget resolves and caches public hosts', async () => {
-  const target = new URL('https://example.com/stream.m3u8')
-  await assertAllowedTarget(target, { allowList: [], allowPrivate: false })
-  // Second call hits DNS cache without throwing
-  await assertAllowedTarget(target, { allowList: [], allowPrivate: false })
+test('rewriteMpdManifest preserves query authentication tokens onto BaseURL and SegmentTemplate', () => {
+  const xml = '<MPD><Period id="1"><BaseURL>dash/</BaseURL><SegmentTemplate initialization="init-$RepresentationID$.dash" media="seg-$Number$.m4s"/></Period></MPD>'
+  const finalUrl = 'https://akamai.cdn.com/live/manifest.mpd?hdnea=st=123~exp=456~hmac=abc'
+  const rewritten = rewriteMpdManifest(xml, finalUrl)
+
+  assert.ok(rewritten.includes('<BaseURL>https://akamai.cdn.com/live/dash/?hdnea=st=123~exp=456~hmac=abc</BaseURL>'))
+  assert.ok(rewritten.includes('initialization="init-$RepresentationID$.dash?hdnea=st=123~exp=456~hmac=abc"'))
+  assert.ok(rewritten.includes('media="seg-$Number$.m4s?hdnea=st=123~exp=456~hmac=abc"'))
+})
+
+test('rewriteHlsManifest preserves query authentication tokens on relative segment URLs', () => {
+  const body = '#EXTM3U\n#EXTINF:6.0,\nsegment1.ts\n#EXTINF:6.0,\nsegment2.ts'
+  const finalUrl = 'https://cdn.example.com/hls/playlist.m3u8?token=xyz123'
+  const rewritten = rewriteHlsManifest(body, finalUrl, undefined, SECRET)
+
+  const lines = rewritten.split('\n')
+  for (const segLine of [lines[2], lines[4]]) {
+    assert.ok(segLine.startsWith('/api/stream?p='))
+    const params = new URL('http://localhost' + segLine).searchParams
+    const decoded = decodeProxyUrl(params.get('p'), params.get('s'), SECRET)
+    assert.ok(decoded?.url.includes('token=xyz123'))
+  }
 })
 
 

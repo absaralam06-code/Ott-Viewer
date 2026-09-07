@@ -338,12 +338,41 @@ export async function attachShaka(
     })
   }
 
+  // Response filter to unwrap ClearKey keys if wrapped in base64
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  player.getNetworkingEngine().registerResponseFilter((type: number, response: any) => {
+    if (
+      shaka.net?.NetworkingEngine?.RequestType?.LICENSE !== undefined &&
+      type === shaka.net.NetworkingEngine.RequestType.LICENSE &&
+      response.data
+    ) {
+      try {
+        const text = shaka.util.StringUtils.fromUTF8(response.data)
+        const parsed = JSON.parse(text)
+        if (parsed.base64 && Array.isArray(parsed.base64.keys)) {
+          const unwrapped = JSON.stringify({
+            keys: parsed.base64.keys,
+            type: parsed.base64.type || 'temporary',
+          })
+          response.data = shaka.util.StringUtils.toUTF8(unwrapped)
+        }
+      } catch {
+        // ignore
+      }
+    }
+  })
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   player.addEventListener('error', (event: any) => {
     const detail = event?.detail
-    const msg = detail
-      ? `Shaka error (${detail.code}): ${detail.message || detail.data?.[0] || 'stream error'}`
-      : 'Shaka playback error'
+    let errorInfo = 'stream error'
+    if (detail) {
+      const code = detail.code
+      const status = detail.data?.[1] ? ` HTTP ${detail.data[1]}` : ''
+      const url = detail.data?.[0] ? ` (${detail.data[0]})` : ''
+      errorInfo = `${detail.message || `Code ${code}`}${status}${url}`
+    }
+    const msg = `Shaka error: ${errorInfo}`
     options.cbs?.onError?.(msg)
   })
 
@@ -368,11 +397,12 @@ export async function attachShaka(
     let msg = 'Failed to load stream in player'
     if (typeof err === 'object' && err !== null) {
       const e = err as Record<string, unknown>
-      if (typeof e.message === 'string' && e.message) msg = e.message
-      else if (typeof e.code === 'number') {
-        const dataStr = Array.isArray(e.data) ? ` (${e.data.join(', ')})` : ''
-        msg = `Shaka error ${e.code}${dataStr}`
-      }
+      const code = typeof e.code === 'number' ? ` (${e.code})` : ''
+      const dataArr = Array.isArray(e.data) ? e.data : []
+      const status = dataArr[1] ? ` HTTP ${dataArr[1]}` : ''
+      const url = dataArr[0] ? ` [${dataArr[0]}]` : ''
+      const baseMsg = typeof e.message === 'string' && e.message ? e.message : 'Shaka playback error'
+      msg = `${baseMsg}${code}${status}${url}`
     } else if (err instanceof Error) {
       msg = err.message
     }

@@ -296,24 +296,63 @@ export function isMpdManifest(contentType: string | null, body: string): boolean
 /**
  * Ensure an MPD manifest has an absolute <BaseURL> so dynamic segment requests
  * evaluate to canonical URLs that can be proxied cleanly.
+ * Also preserves query authentication tokens (e.g. Akamai hdnea, HMAC tokens)
+ * onto BaseURL and SegmentTemplate/SegmentURL/Initialization attributes, because standard
+ * URL resolution discards query parameters from BaseURL when resolving relative segment paths.
  */
 export function rewriteMpdManifest(xml: string, finalUrl: string): string {
-  const baseDir = new URL('.', finalUrl).href
+  let finalParsed: URL | null = null
+  try {
+    finalParsed = new URL(finalUrl)
+  } catch {
+    // ignore
+  }
+  const finalQuery = finalParsed?.search || ''
+  const escapedQuery = finalQuery.replace(/&/g, '&amp;')
+
   let updated = xml.replace(/<BaseURL>([^<]+)<\/BaseURL>/g, (_match, rel) => {
     try {
-      const abs = new URL(rel, finalUrl).href
-      return `<BaseURL>${abs}</BaseURL>`
+      const abs = new URL(rel, finalUrl)
+      if (!abs.search && finalQuery) {
+        abs.search = finalQuery
+      }
+      return `<BaseURL>${abs.href.replace(/&/g, '&amp;')}</BaseURL>`
     } catch {
       return _match
     }
   })
+
   if (!updated.includes('<BaseURL>')) {
+    const baseDir = new URL('.', finalUrl)
+    if (!baseDir.search && finalQuery) {
+      baseDir.search = finalQuery
+    }
+    const escapedBase = baseDir.href.replace(/&/g, '&amp;')
     if (updated.includes('<Period')) {
-      updated = updated.replace(/(<Period[\s\S]*?>)/, `$1\n    <BaseURL>${baseDir}</BaseURL>`)
+      updated = updated.replace(/(<Period[\s\S]*?>)/, `$1\n    <BaseURL>${escapedBase}</BaseURL>`)
     } else {
-      updated = updated.replace(/(<MPD[\s\S]*?>)/, `$1\n    <BaseURL>${baseDir}</BaseURL>`)
+      updated = updated.replace(/(<MPD[\s\S]*?>)/, `$1\n    <BaseURL>${escapedBase}</BaseURL>`)
     }
   }
+
+  // If finalUrl has auth/token query params, ensure SegmentTemplate, SegmentURL, and Initialization
+  // attributes carry the query parameters too, because browser and Shaka URL resolution
+  // strips query params from BaseURL when resolving relative media URLs.
+  if (finalQuery) {
+    const appendQuery = (val: string): string => {
+      const unescapedVal = val.replace(/&amp;/g, '&')
+      if (unescapedVal.includes('?')) {
+        return (unescapedVal + '&' + finalQuery.slice(1)).replace(/&/g, '&amp;')
+      }
+      return (unescapedVal + finalQuery).replace(/&/g, '&amp;')
+    }
+
+    updated = updated.replace(
+      /\b(initialization|media|index|sourceURL)="([^"]+)"/g,
+      (_m, attr, val) => `${attr}="${appendQuery(val)}"`,
+    )
+  }
+
   // Inject ClearKey ContentProtection if cenc is present and clearkey is missing
   if (
     updated.includes('urn:mpeg:dash:mp4protection:2011') &&
@@ -342,12 +381,24 @@ export function rewriteHlsManifest(
   headers: StreamHeaders | undefined,
   secret: string,
 ): string {
+  const finalParsed = (() => {
+    try {
+      return new URL(finalUrl)
+    } catch {
+      return null
+    }
+  })()
+  const finalSearch = finalParsed?.search || ''
+
   const proxied = (raw: string): string => {
     const trimmed = raw.trim()
     if (!trimmed || trimmed.startsWith(PROXY_PATH)) return raw
     try {
-      const absolute = new URL(trimmed, finalUrl).toString()
-      return encodeProxyUrl({ url: absolute, headers }, secret)
+      const parsed = new URL(trimmed, finalUrl)
+      if (!parsed.search && finalSearch) {
+        parsed.search = finalSearch
+      }
+      return encodeProxyUrl({ url: parsed.toString(), headers }, secret)
     } catch {
       return raw
     }

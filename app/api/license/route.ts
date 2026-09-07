@@ -47,9 +47,9 @@ async function handleLicense(request: Request, method: 'GET' | 'POST') {
       'Accept': '*/*',
     }
 
-    const contentType = request.headers.get('content-type') || 'application/json'
+    const reqContentType = request.headers.get('content-type') || 'application/json'
     if (method === 'POST') {
-      headers['Content-Type'] = contentType
+      headers['Content-Type'] = reqContentType
     }
 
     const lowerTarget = targetUrl.toLowerCase()
@@ -70,20 +70,61 @@ async function handleLicense(request: Request, method: 'GET' | 'POST') {
       headers['x-real-ip'] = clientIp
     }
 
-    const body = method === 'POST' ? await request.arrayBuffer() : undefined
+    let body = method === 'POST' ? await request.arrayBuffer() : undefined
 
-    const upstreamRes = await fetch(targetParsed, {
+    let upstreamRes = await fetch(targetParsed, {
       method,
       headers,
       body,
       signal: request.signal,
     })
 
+    // Fallback: If GET failed with 405 or 500 (e.g. servers that require POST body), retry with POST
+    if (method === 'GET' && upstreamRes.status >= 400) {
+      try {
+        const retryHeaders = { ...headers, 'Content-Type': 'application/json' }
+        const retryRes = await fetch(targetParsed, {
+          method: 'POST',
+          headers: retryHeaders,
+          body: Buffer.from('{}'),
+          signal: request.signal,
+        })
+        if (retryRes.ok) {
+          upstreamRes = retryRes
+        }
+      } catch {
+        // keep original upstreamRes
+      }
+    }
+
     const data = await upstreamRes.arrayBuffer()
+    const resContentType = upstreamRes.headers.get('content-type') || 'application/json'
+
+    // Unwrap ClearKey keys if wrapped inside base64 object (e.g. JokerTV format: { base64: { keys: [...] } })
+    try {
+      const text = new TextDecoder('utf-8').decode(data)
+      const parsed = JSON.parse(text)
+      if (parsed.base64 && Array.isArray(parsed.base64.keys)) {
+        const unwrapped = JSON.stringify({
+          keys: parsed.base64.keys,
+          type: parsed.base64.type || 'temporary',
+        })
+        return new NextResponse(unwrapped, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            ...CORS_HEADERS,
+          },
+        })
+      }
+    } catch {
+      // not JSON or parse error, forward raw data below
+    }
+
     return new NextResponse(data, {
       status: upstreamRes.status,
       headers: {
-        'Content-Type': upstreamRes.headers.get('content-type') || 'application/json',
+        'Content-Type': resContentType,
         ...CORS_HEADERS,
       },
     })
