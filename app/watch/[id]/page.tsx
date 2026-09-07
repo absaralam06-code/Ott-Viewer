@@ -55,9 +55,21 @@ export default function WatchPage() {
     if (ch.drm && !ch.drm.licenseUrl) {
       const rawKid = (ch.drm.keyId ?? '').replace(/['"]/g, '').trim().toLowerCase()
       const rawKey = (ch.drm.key ?? '').replace(/['"]/g, '').trim()
+      const firstClearKey = ch.drm.clearKeys ? Object.keys(ch.drm.clearKeys)[0] : ''
       if ((rawKid === 'https' || rawKid === 'http') && rawKey) {
         // Reconstruct license URL that was split on colon
         const fullUrl = `${rawKid}:${rawKey}`
+        const pipe = fullUrl.indexOf('|')
+        const licenseUrl = pipe === -1 ? fullUrl : fullUrl.slice(0, pipe).trim()
+        normalizedCh = {
+          ...ch,
+          drm: {
+            type: 'clearkey',
+            licenseUrl,
+          },
+        }
+      } else if ((firstClearKey === 'https' || firstClearKey === 'http') && ch.drm.clearKeys) {
+        const fullUrl = `${firstClearKey}:${ch.drm.clearKeys[firstClearKey]}`
         const pipe = fullUrl.indexOf('|')
         const licenseUrl = pipe === -1 ? fullUrl : fullUrl.slice(0, pipe).trim()
         normalizedCh = {

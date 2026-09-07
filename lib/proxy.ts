@@ -359,7 +359,7 @@ export function rewriteMpdManifest(xml: string, finalUrl: string): string {
     !updated.includes('1077efec-c0b2-4d02-ace3-3c1e52e2fb4b')
   ) {
     updated = updated.replace(
-      /(<ContentProtection[^>]+schemeIdUri="urn:mpeg:dash:mp4protection:2011"[^>]*\/>)/g,
+      /(<ContentProtection\b[^>]*\burn:mpeg:dash:mp4protection:2011\b[^>]*\/?>)/gi,
       `$1\n        <ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b"/>`,
     )
   }

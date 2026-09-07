@@ -263,6 +263,23 @@ export async function attachShaka(
 
   // Configure ClearKey DRM
   const sanitizeKey = (k: string) => k.toLowerCase().replace(/[^0-9a-f]/g, '')
+  const clearKeysMap: Record<string, string> = {}
+
+  const base64UrlToHex = (str: string): string => {
+    try {
+      const clean = str.replace(/-/g, '+').replace(/_/g, '/')
+      const padded = clean.padEnd(clean.length + ((4 - (clean.length % 4)) % 4), '=')
+      const bin = atob(padded)
+      let hex = ''
+      for (let i = 0; i < bin.length; i++) {
+        hex += bin.charCodeAt(i).toString(16).padStart(2, '0')
+      }
+      return hex.toLowerCase()
+    } catch {
+      return str.replace(/[^0-9a-f]/gi, '').toLowerCase()
+    }
+  }
+
   if (options.drm?.licenseUrl) {
     const licenseEndpoint = `/api/license?url=${encodeURIComponent(options.drm.licenseUrl)}`
     player.configure({
@@ -272,34 +289,67 @@ export async function attachShaka(
         },
       },
     })
-  } else if (options.drm?.clearKeys && Object.keys(options.drm.clearKeys).length) {
-    const cleaned: Record<string, string> = {}
+
+    // Pre-fetch keys to populate clearKeys in Shaka, which forces ClearKey CDM and overrides Widevine
+    try {
+      const res = await fetch(licenseEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+      if (res.ok) {
+        const text = await res.text()
+        const parsed = JSON.parse(text)
+        const keysList = Array.isArray(parsed?.keys)
+          ? parsed.keys
+          : Array.isArray(parsed?.base64?.keys)
+          ? parsed.base64.keys
+          : []
+        for (const item of keysList) {
+          if (item?.kid && item?.k) {
+            const hexKid =
+              item.kid.length === 32 && /^[0-9a-f]+$/i.test(item.kid)
+                ? item.kid.toLowerCase()
+                : base64UrlToHex(item.kid)
+            const hexKey =
+              item.k.length === 32 && /^[0-9a-f]+$/i.test(item.k)
+                ? item.k.toLowerCase()
+                : base64UrlToHex(item.k)
+            if (hexKid.length === 32 && hexKey.length === 32) {
+              clearKeysMap[hexKid] = hexKey
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[player] Could not pre-fetch ClearKey license keys:', e)
+    }
+  }
+
+  if (options.drm?.clearKeys && Object.keys(options.drm.clearKeys).length) {
     for (const [kid, k] of Object.entries(options.drm.clearKeys)) {
       const sKid = sanitizeKey(kid)
       const sK = sanitizeKey(k)
       if (sKid.length >= 16 && sK.length >= 16) {
-        cleaned[sKid] = sK
+        clearKeysMap[sKid] = sK
       }
     }
-    if (Object.keys(cleaned).length) {
-      player.configure({
-        drm: {
-          clearKeys: cleaned,
-        },
-      })
-    }
-  } else if (options.drm?.keyId && options.drm?.key) {
+  }
+
+  if (options.drm?.keyId && options.drm?.key) {
     const cleanKid = sanitizeKey(options.drm.keyId)
     const cleanKey = sanitizeKey(options.drm.key)
     if (cleanKid.length >= 16 && cleanKey.length >= 16) {
-      player.configure({
-        drm: {
-          clearKeys: {
-            [cleanKid]: cleanKey,
-          },
-        },
-      })
+      clearKeysMap[cleanKid] = cleanKey
     }
+  }
+
+  if (Object.keys(clearKeysMap).length > 0) {
+    player.configure({
+      drm: {
+        clearKeys: clearKeysMap,
+      },
+    })
   }
 
   // Intercept segment and manifest requests to pass through /api/stream with ticket
@@ -409,6 +459,7 @@ export async function attachShaka(
     options.cbs?.onError?.(msg)
     const errObj = new Error(msg)
     Object.assign(errObj, err)
+    errObj.message = msg
     throw errObj
   }
 
