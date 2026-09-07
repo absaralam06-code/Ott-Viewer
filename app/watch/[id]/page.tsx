@@ -146,6 +146,7 @@ export default function WatchPage() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#000' }}>
       {/* Top bar */}
       <div
+        className="watch-topbar"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -153,7 +154,7 @@ export default function WatchPage() {
           padding: '0.5rem 1rem',
           background: 'rgba(0,0,0,0.8)',
           backdropFilter: 'blur(8px)',
-          zIndex: 10,
+          zIndex: 30,
           flexShrink: 0,
         }}
       >
@@ -184,18 +185,18 @@ export default function WatchPage() {
       </div>
 
       {/* Player + sidebar */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div className="watch-layout" style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Player */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="watch-player-pane" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {loading && !src && (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <span className="spinner" style={{ width: 48, height: 48, borderWidth: 3 }} />
             </div>
           )}
           {error && (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', gap: 12 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', gap: 12, padding: '1rem', textAlign: 'center' }}>
               <span style={{ fontSize: 48 }}>⚠️</span>
-              <p style={{ margin: 0 }}>{error}</p>
+              <p style={{ margin: 0, maxWidth: 360, fontSize: '0.9rem' }}>{error}</p>
               <button className="btn-primary" onClick={() => void loadChannel(channelId)}>Retry</button>
             </div>
           )}
@@ -218,6 +219,7 @@ export default function WatchPage() {
           {/* Now/Next panel */}
           {channel?.tvgId && (
             <div
+              className="desktop-only"
               style={{
                 background: 'rgba(0,0,0,0.9)',
                 padding: '1rem',
@@ -232,8 +234,9 @@ export default function WatchPage() {
 
         {/* Zap sidebar */}
         <div
+          className="watch-sidebar-pane"
           style={{
-            width: 260,
+            width: 280,
             flexShrink: 0,
             background: 'rgba(10,14,26,0.95)',
             borderLeft: '1px solid rgba(255,255,255,0.08)',

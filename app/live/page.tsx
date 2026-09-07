@@ -127,7 +127,8 @@ export default function LivePage() {
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 12,
+            flexWrap: 'wrap',
+            gap: '8px 12px',
             padding: '0.6rem 1rem',
             borderBottom: '1px solid var(--color-border)',
             flexShrink: 0,
@@ -179,9 +180,10 @@ export default function LivePage() {
         </div>
 
         {/* Main split: sidebar + list */}
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div className="live-split-container" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           {/* Group sidebar */}
           <div
+            className="live-sidebar-container"
             style={{
               width: 200,
               flexShrink: 0,

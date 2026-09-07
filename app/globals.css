@@ -304,3 +304,114 @@ body {
   z-index: 50;
 }
 .tooltip:hover .tooltip-content { opacity: 1; }
+
+/* -------------------------------------------------------------------------- */
+/* Mobile & Responsive Rules                                                  */
+/* -------------------------------------------------------------------------- */
+
+@media (max-width: 768px) {
+  .desktop-only { display: none !important; }
+  .mobile-only { display: flex !important; }
+
+  /* Volume slider on mobile is replaced by direct tap mute button */
+  .player-vol-slider {
+    display: none !important;
+  }
+
+  /* Responsive watch layout: stack vertically in portrait */
+  .watch-layout {
+    flex-direction: column !important;
+  }
+
+  .watch-player-pane {
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 16 / 9 !important;
+    max-height: 42vh !important;
+    flex: none !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 20 !important;
+    background: #000 !important;
+  }
+
+  .watch-sidebar-pane {
+    width: 100% !important;
+    flex: 1 !important;
+    border-left: none !important;
+    border-top: 1px solid var(--color-border) !important;
+    min-height: 200px !important;
+  }
+
+  /* Mobile Live Page Layout */
+  .live-split-container {
+    flex-direction: column !important;
+  }
+
+  .live-sidebar-container {
+    width: 100% !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--color-border) !important;
+    max-height: 48px !important;
+    padding: 0.35rem 0.5rem !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    white-space: nowrap !important;
+    display: flex !important;
+  }
+
+  .live-sidebar-container aside {
+    width: auto !important;
+    flex-direction: row !important;
+    gap: 6px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+  }
+
+  .live-sidebar-container .sidebar-item {
+    padding: 0.35rem 0.65rem !important;
+    font-size: 0.8rem !important;
+    border-radius: 99px !important;
+    background: var(--color-surface-2) !important;
+    border: 1px solid var(--color-border) !important;
+    flex-shrink: 0 !important;
+    display: inline-flex !important;
+    gap: 6px !important;
+  }
+
+  .live-sidebar-container .sidebar-item.active {
+    background: var(--color-accent) !important;
+    color: white !important;
+    border-color: var(--color-accent) !important;
+  }
+}
+
+@media (min-width: 769px) {
+  .desktop-only { display: flex !important; }
+  .mobile-only { display: none !important; }
+}
+
+/* Fullscreen on mobile landscape */
+@media (max-width: 900px) and (orientation: landscape) {
+  .watch-topbar {
+    display: none !important;
+  }
+  .watch-sidebar-pane {
+    display: none !important;
+  }
+  .watch-player-pane {
+    max-height: 100vh !important;
+    height: 100vh !important;
+    aspect-ratio: auto !important;
+  }
+}
+
+/* Safe area padding for mobile notches and home indicators */
+.safe-bottom {
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+.safe-top {
+  padding-top: calc(0.5rem + env(safe-area-inset-top, 0px));
+}
+

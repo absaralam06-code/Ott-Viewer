@@ -79,8 +79,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <span style={{ display: 'none' }} className="sm:block">OTT</span>
         </Link>
 
-        {/* Nav links */}
-        <nav style={{ display: 'flex', gap: '2px', flex: 1 }}>
+        {/* Nav links for desktop */}
+        <nav className="desktop-only" style={{ gap: '2px', flex: 1 }}>
           {NAV.map(({ href, label, icon }) => {
             const active =
               href === '/' ? pathname === '/' : pathname.startsWith(href)
@@ -110,6 +110,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
+        <div style={{ flex: 1 }} className="mobile-only" />
+
         {/* Sign-out */}
         <button
           onClick={signOut}
@@ -122,7 +124,59 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Main */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>{children}</main>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingBottom: 'calc(56px + env(safe-area-inset-bottom, 0px))' }}>
+        {children}
+      </main>
+
+      {/* Mobile Bottom Nav Bar */}
+      <nav
+        className="glass mobile-only"
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 'calc(56px + env(safe-area-inset-bottom, 0px))',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-around',
+          zIndex: 50,
+          borderLeft: 'none',
+          borderRight: 'none',
+          borderBottom: 'none',
+          background: 'rgba(10, 14, 26, 0.95)',
+          backdropFilter: 'blur(16px)',
+        }}
+      >
+        {NAV.map(({ href, label, icon }) => {
+          const active =
+            href === '/' ? pathname === '/' : pathname.startsWith(href)
+          return (
+            <Link
+              key={href}
+              href={href}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 2,
+                textDecoration: 'none',
+                color: active ? 'var(--color-accent-hover)' : 'var(--color-text-muted)',
+                fontSize: '0.68rem',
+                fontWeight: active ? 600 : 400,
+                padding: '4px 8px',
+                flex: 1,
+                transition: 'color 0.15s',
+              }}
+            >
+              <span style={{ fontSize: 18 }}>{icon}</span>
+              <span>{label}</span>
+            </Link>
+          )
+        })}
+      </nav>
     </div>
   )
 }

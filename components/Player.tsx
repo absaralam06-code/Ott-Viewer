@@ -115,7 +115,14 @@ export default function Player({
         engineRef.current = handle
       }
 
-      void video.play().catch(() => {})
+      // Attempt autoplay; fallback to muted autoplay on mobile if browser blocks audio autoplay
+      video.play().catch((err: unknown) => {
+        if (err instanceof Error && err.name === 'NotAllowedError') {
+          video.muted = true
+          setMuted(true)
+          void video.play().catch(() => {})
+        }
+      })
     }
 
     void setup()
@@ -245,8 +252,16 @@ export default function Player({
   }
 
   const toggleFullscreen = () => {
-    if (document.fullscreenElement) void document.exitFullscreen()
-    else void containerRef.current?.requestFullscreen()
+    const container = containerRef.current
+    const video = videoRef.current
+    if (document.fullscreenElement) {
+      void document.exitFullscreen()
+    } else if (container?.requestFullscreen) {
+      void container.requestFullscreen()
+    } else if (video && 'webkitEnterFullscreen' in video) {
+      // iOS Safari native fullscreen on HTMLVideoElement
+      ;(video as HTMLVideoElement & { webkitEnterFullscreen: () => void }).webkitEnterFullscreen()
+    }
   }
 
   const togglePip = async () => {
@@ -309,6 +324,7 @@ export default function Player({
             alignItems: 'center',
             justifyContent: 'center',
             background: 'rgba(0,0,0,0.4)',
+            pointerEvents: 'none',
           }}
         >
           <span className="spinner" style={{ width: 40, height: 40, borderWidth: 3 }} />
@@ -450,6 +466,7 @@ export default function Player({
               setVolume(v)
               setMuted(v === 0)
             }}
+            className="player-vol-slider"
             style={{ width: 72, accentColor: 'var(--color-accent)' }}
             aria-label="Volume"
           />
@@ -468,7 +485,7 @@ export default function Player({
           <IBtn onClick={() => setShowStats((s) => !s)} aria="Stats" title="Stats (i)">ℹ</IBtn>
 
           {/* PiP */}
-          {document?.pictureInPictureEnabled && (
+          {typeof document !== 'undefined' && document.pictureInPictureEnabled && (
             <IBtn onClick={() => void togglePip()} aria="Picture-in-picture" title="PiP">
               {pip ? '🗗' : '🗗'}
             </IBtn>
@@ -504,8 +521,13 @@ function IBtn({
         cursor: 'pointer',
         color: 'white',
         fontSize: 18,
-        padding: '4px 6px',
-        borderRadius: 6,
+        padding: '6px 8px',
+        minWidth: 38,
+        minHeight: 38,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 8,
         lineHeight: 1,
         transition: 'background 0.12s',
       }}
