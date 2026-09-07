@@ -53,13 +53,18 @@ export default function WatchPage() {
     // Backwards-compatibility for existing IndexedDB entries with Hotstar ClearKey license or corrupted URL split
     let normalizedCh = ch
     if (ch.drm && !ch.drm.licenseUrl) {
-      if ((ch.drm.keyId === 'https' || ch.drm.keyId === 'http') && ch.drm.key) {
+      const rawKid = (ch.drm.keyId ?? '').replace(/['"]/g, '').trim().toLowerCase()
+      const rawKey = (ch.drm.key ?? '').replace(/['"]/g, '').trim()
+      if ((rawKid === 'https' || rawKid === 'http') && rawKey) {
         // Reconstruct license URL that was split on colon
+        const fullUrl = `${rawKid}:${rawKey}`
+        const pipe = fullUrl.indexOf('|')
+        const licenseUrl = pipe === -1 ? fullUrl : fullUrl.slice(0, pipe).trim()
         normalizedCh = {
           ...ch,
           drm: {
             type: 'clearkey',
-            licenseUrl: `${ch.drm.keyId}:${ch.drm.key}`,
+            licenseUrl,
           },
         }
       } else if (ch.url.includes('hotstar')) {

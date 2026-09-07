@@ -90,25 +90,6 @@ async function handle(request: Request, method: 'GET' | 'HEAD'): Promise<Respons
       return new Response('invalid target protocol', { status: 400, headers: CORS_HEADERS })
     }
 
-    // Check if target is same origin or same apex domain or a standard media resource
-    const isSameOrigin = targetParsed.origin === ticket.origin
-    let isSameDomain = false
-    try {
-      const ticketHost = new URL(ticket.origin).hostname.toLowerCase()
-      const targetHost = targetParsed.hostname.toLowerCase()
-      const getApex = (h: string) => {
-        const parts = h.split('.')
-        return parts.length >= 2 ? parts.slice(-2).join('.') : h
-      }
-      isSameDomain = getApex(ticketHost) === getApex(targetHost)
-    } catch {
-      /* ignore */
-    }
-    const isMedia = /\.(m4s|mp4|ts|aac|key|bin|dash|m3u8|mpd)($|\?)/i.test(targetParsed.pathname + targetParsed.search)
-
-    if (!isSameOrigin && !isSameDomain && !isMedia) {
-      return new Response('ticket origin mismatch', { status: 403, headers: CORS_HEADERS })
-    }
     target = { url: targetUrl, headers: ticket.headers }
   } else {
     target = decodeProxyUrl(url.searchParams.get('p'), url.searchParams.get('s'), secret)

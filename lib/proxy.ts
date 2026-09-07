@@ -308,7 +308,11 @@ export function rewriteMpdManifest(xml: string, finalUrl: string): string {
     }
   })
   if (!updated.includes('<BaseURL>')) {
-    updated = updated.replace(/<Period([^>]*)>/, `<Period$1>\n    <BaseURL>${baseDir}</BaseURL>`)
+    if (updated.includes('<Period')) {
+      updated = updated.replace(/(<Period[\s\S]*?>)/, `$1\n    <BaseURL>${baseDir}</BaseURL>`)
+    } else {
+      updated = updated.replace(/(<MPD[\s\S]*?>)/, `$1\n    <BaseURL>${baseDir}</BaseURL>`)
+    }
   }
   // Inject ClearKey ContentProtection if cenc is present and clearkey is missing
   if (

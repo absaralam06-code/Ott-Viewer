@@ -92,17 +92,31 @@ export default function Player({
           if (poster) video.poster = poster
           video.load()
         } else if (engine === 'shaka') {
-          const handle = await attachShaka(src, video, {
-            drm,
-            ticket,
-            headers: streamHeaders,
-            cbs: {
-              onError: (msg) => { if (mounted) { setError(msg); setLoading(false) } },
-              onStats: (s) => { if (mounted) setStats(s) },
-            },
-          })
-          if (!mounted) { handle.destroy(); return }
-          engineRef.current = handle
+          try {
+            const handle = await attachShaka(src, video, {
+              drm,
+              ticket,
+              headers: streamHeaders,
+              cbs: {
+                onError: (msg) => { if (mounted) { setError(msg); setLoading(false) } },
+                onStats: (s) => { if (mounted) setStats(s) },
+              },
+            })
+            if (!mounted) { handle.destroy(); return }
+            engineRef.current = handle
+          } catch (shakaErr) {
+            console.warn('[player] Shaka load failed, attempting fallback to Hls.js:', shakaErr)
+            try {
+              const handle = await attachHlsJs(src, video, {
+                onError: (msg) => { if (mounted) { setError(msg); setLoading(false) } },
+                onStats: (s) => { if (mounted) setStats(s) },
+              })
+              if (!mounted) { handle.destroy(); return }
+              engineRef.current = handle
+            } catch {
+              throw shakaErr
+            }
+          }
         } else if (engine === 'hlsjs') {
           const handle = await attachHlsJs(src, video, {
             onError: (msg) => { if (mounted) { setError(msg); setLoading(false) } },
@@ -128,7 +142,17 @@ export default function Player({
         })
       } catch (err: unknown) {
         if (!mounted) return
-        const msg = err instanceof Error ? err.message : 'Failed to initialize player engine'
+        let msg = 'Playback failed to start'
+        if (typeof err === 'object' && err !== null) {
+          const e = err as Record<string, unknown>
+          if (typeof e.message === 'string' && e.message) msg = e.message
+          else if (typeof e.code === 'number') {
+            const dataStr = Array.isArray(e.data) ? ` (${e.data.join(', ')})` : ''
+            msg = `Playback error (code ${e.code}${dataStr})`
+          }
+        } else if (err instanceof Error && err.message) {
+          msg = err.message
+        }
         setError(msg)
         setLoading(false)
       }
@@ -153,7 +177,7 @@ export default function Player({
       video.load()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src, retryTrigger])
+  }, [src, retryTrigger, ticket?.t, drm?.licenseUrl, drm?.keyId])
 
   // Sync volume/muted
   useEffect(() => {

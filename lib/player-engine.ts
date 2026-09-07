@@ -14,11 +14,6 @@ export function pickEngine(
   videoEl: HTMLVideoElement,
   drm?: DrmConfig,
 ): EngineKind {
-  // If DRM is configured (keys or license URL), always route to Shaka
-  if (drm && (drm.keyId || drm.licenseUrl || (drm.clearKeys && Object.keys(drm.clearKeys).length))) {
-    return 'shaka'
-  }
-
   let testUrl = url
   try {
     const parsed = new URL(url, typeof window !== 'undefined' ? window.location.href : 'http://localhost')
@@ -40,7 +35,24 @@ export function pickEngine(
   }
 
   const lower = testUrl.toLowerCase().split('?')[0]
-  if (/\.mpd(\b|$)/.test(lower) || lower.includes('.mpd')) {
+
+  const hasValidLicenseUrl = Boolean(drm?.licenseUrl && /^https?:\/\//i.test(drm.licenseUrl))
+  const cleanKid = (drm?.keyId || '').toLowerCase().replace(/[^0-9a-f]/g, '')
+  const cleanKey = (drm?.key || '').toLowerCase().replace(/[^0-9a-f]/g, '')
+  const hasValidDirectKeys = Boolean(cleanKid.length >= 16 && cleanKey.length >= 16)
+  const hasValidClearKeys = Boolean(
+    drm?.clearKeys &&
+    Object.entries(drm.clearKeys).some(([kid, k]) => {
+      const cKid = kid.toLowerCase().replace(/[^0-9a-f]/g, '')
+      const cK = k.toLowerCase().replace(/[^0-9a-f]/g, '')
+      return cKid.length >= 16 && cK.length >= 16
+    })
+  )
+
+  const isDrmReady = hasValidLicenseUrl || hasValidDirectKeys || hasValidClearKeys
+  const isDash = /\.mpd(\b|$)/.test(lower) || lower.includes('.mpd')
+
+  if (isDrmReady || isDash) {
     return 'shaka'
   }
   const isSafari =
@@ -250,6 +262,7 @@ export async function attachShaka(
   })
 
   // Configure ClearKey DRM
+  const sanitizeKey = (k: string) => k.toLowerCase().replace(/[^0-9a-f]/g, '')
   if (options.drm?.licenseUrl) {
     const licenseEndpoint = `/api/license?url=${encodeURIComponent(options.drm.licenseUrl)}`
     player.configure({
@@ -260,21 +273,33 @@ export async function attachShaka(
       },
     })
   } else if (options.drm?.clearKeys && Object.keys(options.drm.clearKeys).length) {
-    player.configure({
-      drm: {
-        clearKeys: options.drm.clearKeys,
-      },
-    })
-  } else if (options.drm?.keyId && options.drm?.key) {
-    const cleanKid = options.drm.keyId.toLowerCase().replace(/[^0-9a-f]/g, '')
-    const cleanKey = options.drm.key.toLowerCase().replace(/[^0-9a-f]/g, '')
-    player.configure({
-      drm: {
-        clearKeys: {
-          [cleanKid]: cleanKey,
+    const cleaned: Record<string, string> = {}
+    for (const [kid, k] of Object.entries(options.drm.clearKeys)) {
+      const sKid = sanitizeKey(kid)
+      const sK = sanitizeKey(k)
+      if (sKid.length >= 16 && sK.length >= 16) {
+        cleaned[sKid] = sK
+      }
+    }
+    if (Object.keys(cleaned).length) {
+      player.configure({
+        drm: {
+          clearKeys: cleaned,
         },
-      },
-    })
+      })
+    }
+  } else if (options.drm?.keyId && options.drm?.key) {
+    const cleanKid = sanitizeKey(options.drm.keyId)
+    const cleanKey = sanitizeKey(options.drm.key)
+    if (cleanKid.length >= 16 && cleanKey.length >= 16) {
+      player.configure({
+        drm: {
+          clearKeys: {
+            [cleanKid]: cleanKey,
+          },
+        },
+      })
+    }
   }
 
   // Intercept segment and manifest requests to pass through /api/stream with ticket
@@ -290,17 +315,25 @@ export async function attachShaka(
       ) {
         return
       }
-      const uri = request.uris[0]
-      if (
-        uri &&
-        !uri.startsWith('/api/stream') &&
-        !uri.startsWith('/api/license') &&
-        !uri.startsWith(window.location.origin + '/api/stream') &&
-        !uri.startsWith(window.location.origin + '/api/license')
-      ) {
-        request.uris = [
-          `/api/stream?t=${encodeURIComponent(ticket.t)}&ts=${encodeURIComponent(ticket.ts)}&u=${encodeURIComponent(uri)}`,
-        ]
+      let uri = request.uris[0]
+      if (uri) {
+        try {
+          if (!/^https?:\/\//i.test(uri)) {
+            uri = new URL(uri, window.location.href).href
+          }
+        } catch {
+          // ignore
+        }
+        if (
+          !uri.startsWith('/api/stream') &&
+          !uri.startsWith('/api/license') &&
+          !uri.startsWith(window.location.origin + '/api/stream') &&
+          !uri.startsWith(window.location.origin + '/api/license')
+        ) {
+          request.uris = [
+            `/api/stream?t=${encodeURIComponent(ticket.t)}&ts=${encodeURIComponent(ticket.ts)}&u=${encodeURIComponent(uri)}`,
+          ]
+        }
       }
     })
   }
@@ -332,9 +365,21 @@ export async function attachShaka(
   try {
     await player.load(src)
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Failed to load stream in player'
+    let msg = 'Failed to load stream in player'
+    if (typeof err === 'object' && err !== null) {
+      const e = err as Record<string, unknown>
+      if (typeof e.message === 'string' && e.message) msg = e.message
+      else if (typeof e.code === 'number') {
+        const dataStr = Array.isArray(e.data) ? ` (${e.data.join(', ')})` : ''
+        msg = `Shaka error ${e.code}${dataStr}`
+      }
+    } else if (err instanceof Error) {
+      msg = err.message
+    }
     options.cbs?.onError?.(msg)
-    throw err
+    const errObj = new Error(msg)
+    Object.assign(errObj, err)
+    throw errObj
   }
 
   return {
