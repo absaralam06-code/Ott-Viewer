@@ -35,10 +35,19 @@ const DROPPED_RESPONSE_HEADERS = new Set([
   'strict-transport-security',
 ])
 
+const CORS_HEADERS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, HEAD, OPTIONS',
+  'access-control-allow-headers': '*',
+}
+
 function passThroughHeaders(source: Headers): Headers {
   const out = new Headers()
   for (const [key, value] of source) {
     if (!DROPPED_RESPONSE_HEADERS.has(key.toLowerCase())) out.set(key, value)
+  }
+  for (const [key, value] of Object.entries(CORS_HEADERS)) {
+    out.set(key, value)
   }
   return out
 }
@@ -68,16 +77,16 @@ async function handle(request: Request, method: 'GET' | 'HEAD'): Promise<Respons
     const ticket = decodeProxyTicket(url.searchParams.get('t'), url.searchParams.get('ts'), secret)
     const targetUrl = url.searchParams.get('u')
     if (!ticket || !targetUrl) {
-      return new Response('invalid or expired stream ticket', { status: 403 })
+      return new Response('invalid or expired stream ticket', { status: 403, headers: CORS_HEADERS })
     }
     let targetParsed: URL
     try {
       targetParsed = new URL(targetUrl)
     } catch {
-      return new Response('invalid target url', { status: 400 })
+      return new Response('invalid target url', { status: 400, headers: CORS_HEADERS })
     }
     if (targetParsed.origin !== ticket.origin) {
-      return new Response('ticket origin mismatch', { status: 403 })
+      return new Response('ticket origin mismatch', { status: 403, headers: CORS_HEADERS })
     }
     target = { url: targetUrl, headers: ticket.headers }
   } else {
@@ -85,7 +94,7 @@ async function handle(request: Request, method: 'GET' | 'HEAD'): Promise<Respons
   }
 
   if (!target) {
-    return new Response('invalid or unsigned proxy url', { status: 403 })
+    return new Response('invalid or unsigned proxy url', { status: 403, headers: CORS_HEADERS })
   }
 
   try {
@@ -122,8 +131,19 @@ async function handle(request: Request, method: 'GET' | 'HEAD'): Promise<Respons
           return new Response(rewritten, { status: response.status, headers })
         }
         // Not a manifest after all — return exact raw bytes untouched!
+        if (response.headers.has('content-length')) {
+          headers.set('content-length', response.headers.get('content-length')!)
+        }
         return new Response(rawBytes, { status: response.status, headers })
       }
+    }
+
+    // Preserve media segment and key lengths / ranges
+    if (response.headers.has('content-length')) {
+      headers.set('content-length', response.headers.get('content-length')!)
+    }
+    if (response.headers.has('content-range')) {
+      headers.set('content-range', response.headers.get('content-range')!)
     }
 
     // Responses are behind the session cookie, so never `public`.
@@ -133,12 +153,12 @@ async function handle(request: Request, method: 'GET' | 'HEAD'): Promise<Respons
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       // The viewer navigated away or zapped channels; not an error worth logging.
-      return new Response(null, { status: 499 })
+      return new Response(null, { status: 499, headers: CORS_HEADERS })
     }
     const status = err instanceof ProxyError ? err.status : 502
     const message = err instanceof ProxyError ? err.message : 'upstream request failed'
     console.error(`[stream] ${message} for ${redactUrl(target.url)}`)
-    return new Response(message, { status })
+    return new Response(message, { status, headers: CORS_HEADERS })
   }
 }
 
@@ -148,4 +168,16 @@ export async function GET(request: Request) {
 
 export async function HEAD(request: Request) {
   return handle(request, 'HEAD')
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, HEAD, OPTIONS',
+      'access-control-allow-headers': '*',
+      'access-control-max-age': '86400',
+    },
+  })
 }

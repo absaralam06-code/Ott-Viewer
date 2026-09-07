@@ -219,6 +219,9 @@ export interface HostPolicy {
   allowPrivate: boolean
 }
 
+const dnsCache = new Map<string, { addresses: { address: string }[]; expiresAt: number }>()
+const DNS_CACHE_TTL_MS = 60_000
+
 /** Throws if the URL's host is disallowed or resolves into private space. */
 export async function assertAllowedTarget(url: URL, policy: HostPolicy): Promise<void> {
   const hostname = url.hostname
@@ -232,12 +235,20 @@ export async function assertAllowedTarget(url: URL, policy: HostPolicy): Promise
     if (isPrivateAddress(literal)) throw new ProxyError(403, 'target resolves to a private address')
     return
   }
+
+  const cached = dnsCache.get(hostname)
   let addresses: { address: string }[]
-  try {
-    addresses = await lookup(hostname, { all: true })
-  } catch {
-    throw new ProxyError(502, 'could not resolve host')
+  if (cached && cached.expiresAt > Date.now()) {
+    addresses = cached.addresses
+  } else {
+    try {
+      addresses = await lookup(hostname, { all: true })
+      dnsCache.set(hostname, { addresses, expiresAt: Date.now() + DNS_CACHE_TTL_MS })
+    } catch {
+      throw new ProxyError(502, 'could not resolve host')
+    }
   }
+
   if (!addresses.length) throw new ProxyError(502, 'could not resolve host')
   if (addresses.some((a) => isPrivateAddress(a.address))) {
     throw new ProxyError(403, 'target resolves to a private address')

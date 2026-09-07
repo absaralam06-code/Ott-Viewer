@@ -53,6 +53,7 @@ export default function Player({
   const [showStats, setShowStats] = useState(false)
   const [audioTracks, setAudioTracks] = useState<{ id: number; name: string }[]>([])
   const [, setSubTracks] = useState<{ id: number; name: string }[]>([])
+  const [retryTrigger, setRetryTrigger] = useState(0)
 
   const resetHideTimer = useCallback(() => {
     setShowControls(true)
@@ -127,7 +128,7 @@ export default function Player({
       video.load()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src])
+  }, [src, retryTrigger])
 
   // Sync volume/muted
   useEffect(() => {
@@ -337,7 +338,8 @@ export default function Player({
             className="btn-primary"
             onClick={() => {
               setError(null)
-              if (videoRef.current) void videoRef.current.play().catch(() => {})
+              setLoading(true)
+              setRetryTrigger((n) => n + 1)
             }}
           >
             Retry

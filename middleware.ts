@@ -11,7 +11,7 @@ import { sessionSecret } from './lib/env'
  * for whoever finds it.
  */
 
-const PUBLIC_PATHS = ['/login', '/api/auth']
+const PUBLIC_PATHS = ['/login', '/api/auth', '/api/stream', '/api/license']
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl

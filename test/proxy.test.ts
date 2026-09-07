@@ -250,3 +250,11 @@ test('isMpdManifest detects dash manifests and rewriteMpdManifest injects BaseUR
   assert.ok(rewritten.includes('urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b'))
 })
 
+test('assertAllowedTarget resolves and caches public hosts', async () => {
+  const target = new URL('https://example.com/stream.m3u8')
+  await assertAllowedTarget(target, { allowList: [], allowPrivate: false })
+  // Second call hits DNS cache without throwing
+  await assertAllowedTarget(target, { allowList: [], allowPrivate: false })
+})
+
+

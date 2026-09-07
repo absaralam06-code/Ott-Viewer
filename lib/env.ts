@@ -29,10 +29,14 @@ export function appPassword(): string {
 function secret(name: string, devSalt: string): string {
   const value = optional(name)
   if (value) return value
+  const password = optional('APP_PASSWORD')
+  if (password) {
+    return `prod-derived:${devSalt}:${password}`
+  }
   if (isProduction()) {
     throw new Error(`${name} is not set. Generate one with: openssl rand -hex 32`)
   }
-  return `dev:${devSalt}:${optional('APP_PASSWORD') ?? 'ott'}`
+  return `dev:${devSalt}:ott`
 }
 
 export function sessionSecret(): string {

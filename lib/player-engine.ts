@@ -67,16 +67,27 @@ export async function attachHlsJs(
 
   hls.on(Hls.Events.ERROR, (_ev, data) => {
     if (data.fatal) {
-      const msg = `HLS error: ${data.details}`
+      const httpCode = data.response?.code
+      const msg = `HLS error: ${data.details}${httpCode ? ` (HTTP ${httpCode})` : ''}`
       if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-        const delay = RECONNECT_DELAY_MS[Math.min(retries++, RECONNECT_DELAY_MS.length - 1)]
-        setTimeout(() => hls.startLoad(), delay)
+        if (retries >= 3) {
+          cbs.onError?.(
+            `Stream connection failed: ${data.details}${httpCode ? ` (HTTP ${httpCode})` : ''}. Stream may be offline, geo-restricted, or blocked.`
+          )
+        } else {
+          const delay = RECONNECT_DELAY_MS[Math.min(retries++, RECONNECT_DELAY_MS.length - 1)]
+          setTimeout(() => hls.startLoad(), delay)
+        }
       } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
         hls.recoverMediaError()
       } else {
         cbs.onError?.(msg)
       }
     }
+  })
+
+  hls.on(Hls.Events.FRAG_LOADED, () => {
+    retries = 0
   })
 
   hls.loadSource(src)
