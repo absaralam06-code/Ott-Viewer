@@ -32,6 +32,13 @@ export async function POST(request: Request) {
     if (typeof value === 'string' && value) headers[key] = value
   }
 
+  const clientIp =
+    (typeof raw.clientIp === 'string' && raw.clientIp) ||
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip')?.trim() ||
+    undefined
+  if (clientIp) headers.clientIp = clientIp
+
   let streamUrl = body.url.trim()
   const pipeIdx = streamUrl.indexOf('|')
   if (pipeIdx !== -1) {

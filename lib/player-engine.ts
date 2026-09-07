@@ -14,8 +14,33 @@ export function pickEngine(
   videoEl: HTMLVideoElement,
   drm?: DrmConfig,
 ): EngineKind {
-  const lower = url.toLowerCase().split('?')[0]
-  if (drm || /\.mpd(\b|$)/.test(lower) || lower.includes('.mpd')) {
+  // If DRM is configured (keys or license URL), always route to Shaka
+  if (drm && (drm.keyId || drm.licenseUrl || (drm.clearKeys && Object.keys(drm.clearKeys).length))) {
+    return 'shaka'
+  }
+
+  let testUrl = url
+  try {
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.href : 'http://localhost')
+    if (parsed.searchParams.has('u')) {
+      testUrl = parsed.searchParams.get('u') || url
+    } else if (parsed.searchParams.has('p')) {
+      const p = parsed.searchParams.get('p')
+      if (p) {
+        const decoded = JSON.parse(
+          typeof atob !== 'undefined'
+            ? atob(p.replace(/-/g, '+').replace(/_/g, '/'))
+            : Buffer.from(p, 'base64url').toString('utf8')
+        )
+        if (decoded?.u) testUrl = decoded.u
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const lower = testUrl.toLowerCase().split('?')[0]
+  if (/\.mpd(\b|$)/.test(lower) || lower.includes('.mpd')) {
     return 'shaka'
   }
   const isSafari =
@@ -63,9 +88,22 @@ export async function attachHlsJs(
     enableWorker: true,
     lowLatencyMode: false,
     backBufferLength: 60,
+    maxBufferLength: 30,
+    maxMaxBufferLength: 60,
+    maxBufferHole: 0.5,
+    nudgeOffset: 0.2,
+    nudgeMaxRetry: 10,
+    liveSyncDurationCount: 3,
+    liveMaxLatencyDurationCount: 10,
   })
 
   hls.on(Hls.Events.ERROR, (_ev, data) => {
+    if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+      // Nudge past buffer holes commonly found in restreamed IPTV
+      video.currentTime += 0.1
+      return
+    }
+
     if (data.fatal) {
       const httpCode = data.response?.code
       const msg = `HLS error: ${data.details}${httpCode ? ` (HTTP ${httpCode})` : ''}`
@@ -183,6 +221,34 @@ export async function attachShaka(
   const player = new shaka.Player()
   await player.attach(video)
 
+  // Configure resilient streaming and DASH drift correction
+  player.configure({
+    streaming: {
+      bufferingGoal: 4,
+      rebufferingGoal: 1.5,
+      bufferBehind: 15,
+      stallEnabled: true,
+      stallThreshold: 1,
+      stallSkip: 0.2,
+      jumpLargeGaps: true,
+      alwaysStreamLookup: true,
+      safeSeekOffset: 2,
+    },
+    manifest: {
+      dash: {
+        autoCorrectDrift: true,
+        ignoreMinBufferTime: true,
+      },
+      retryParameters: {
+        maxAttempts: 4,
+        baseDelay: 500,
+        backoffFactor: 1.5,
+        fuzzFactor: 0.2,
+        timeout: 8000,
+      },
+    },
+  })
+
   // Configure ClearKey DRM
   if (options.drm?.licenseUrl) {
     const licenseEndpoint = `/api/license?url=${encodeURIComponent(options.drm.licenseUrl)}`
@@ -200,10 +266,12 @@ export async function attachShaka(
       },
     })
   } else if (options.drm?.keyId && options.drm?.key) {
+    const cleanKid = options.drm.keyId.toLowerCase().replace(/[^0-9a-f]/g, '')
+    const cleanKey = options.drm.key.toLowerCase().replace(/[^0-9a-f]/g, '')
     player.configure({
       drm: {
         clearKeys: {
-          [options.drm.keyId]: options.drm.key,
+          [cleanKid]: cleanKey,
         },
       },
     })
@@ -261,7 +329,13 @@ export async function attachShaka(
     options.cbs.onStats({ bitrate, buffered: buf, dropped })
   }, 2000)
 
-  await player.load(src)
+  try {
+    await player.load(src)
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to load stream in player'
+    options.cbs?.onError?.(msg)
+    throw err
+  }
 
   return {
     destroy: () => {

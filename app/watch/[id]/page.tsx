@@ -50,18 +50,26 @@ export default function WatchPage() {
       return
     }
 
-    // Backwards-compatibility for existing IndexedDB entries with Hotstar ClearKey license
+    // Backwards-compatibility for existing IndexedDB entries with Hotstar ClearKey license or corrupted URL split
     let normalizedCh = ch
-    if (
-      (!ch.drm?.licenseUrl && ch.drm?.keyId === 'https') ||
-      (!ch.drm?.licenseUrl && ch.url.includes('hotstar'))
-    ) {
-      normalizedCh = {
-        ...ch,
-        drm: {
-          type: 'clearkey',
-          licenseUrl: 'https://hotstarlicenceurl.cstds.workers.dev/plugx',
-        },
+    if (ch.drm && !ch.drm.licenseUrl) {
+      if ((ch.drm.keyId === 'https' || ch.drm.keyId === 'http') && ch.drm.key) {
+        // Reconstruct license URL that was split on colon
+        normalizedCh = {
+          ...ch,
+          drm: {
+            type: 'clearkey',
+            licenseUrl: `${ch.drm.keyId}:${ch.drm.key}`,
+          },
+        }
+      } else if (ch.url.includes('hotstar')) {
+        normalizedCh = {
+          ...ch,
+          drm: {
+            type: 'clearkey',
+            licenseUrl: 'https://hotstarlicenceurl.cstds.workers.dev/plugx',
+          },
+        }
       }
     }
 
@@ -203,6 +211,7 @@ export default function WatchPage() {
           {src && channel && (
             <Player
               src={src}
+              originalUrl={channel.url}
               title={channel.name}
               kind={channel.kind}
               poster={channel.poster}

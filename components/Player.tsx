@@ -7,6 +7,7 @@ import { useAppStore } from '@/lib/store'
 
 export interface PlayerProps {
   src: string
+  originalUrl?: string
   title?: string
   kind?: 'live' | 'movie' | 'series'
   poster?: string
@@ -22,6 +23,7 @@ export interface PlayerProps {
 
 export default function Player({
   src,
+  originalUrl,
   title,
   kind = 'live',
   poster,
@@ -72,7 +74,7 @@ export default function Player({
     engineRef.current?.destroy()
     engineRef.current = null
 
-    const engine = pickEngine(src, video, drm)
+    const engine = pickEngine(originalUrl || src, video, drm)
 
     video.volume = volume
     video.muted = muted
@@ -84,51 +86,67 @@ export default function Player({
     let mounted = true
 
     const setup = async () => {
-      if (engine === 'native-hls' || engine === 'native') {
-        video.src = src
-        if (poster) video.poster = poster
-        video.load()
-      } else if (engine === 'shaka') {
-        const handle = await attachShaka(src, video, {
-          drm,
-          ticket,
-          headers: streamHeaders,
-          cbs: {
-            onError: (msg) => { if (mounted) setError(msg) },
+      try {
+        if (engine === 'native-hls' || engine === 'native') {
+          video.src = src
+          if (poster) video.poster = poster
+          video.load()
+        } else if (engine === 'shaka') {
+          const handle = await attachShaka(src, video, {
+            drm,
+            ticket,
+            headers: streamHeaders,
+            cbs: {
+              onError: (msg) => { if (mounted) { setError(msg); setLoading(false) } },
+              onStats: (s) => { if (mounted) setStats(s) },
+            },
+          })
+          if (!mounted) { handle.destroy(); return }
+          engineRef.current = handle
+        } else if (engine === 'hlsjs') {
+          const handle = await attachHlsJs(src, video, {
+            onError: (msg) => { if (mounted) { setError(msg); setLoading(false) } },
             onStats: (s) => { if (mounted) setStats(s) },
-          },
-        })
-        if (!mounted) { handle.destroy(); return }
-        engineRef.current = handle
-      } else if (engine === 'hlsjs') {
-        const handle = await attachHlsJs(src, video, {
-          onError: (msg) => { if (mounted) setError(msg) },
-          onStats: (s) => { if (mounted) setStats(s) },
-        })
-        if (!mounted) { handle.destroy(); return }
-        engineRef.current = handle
-      } else {
-        const handle = await attachMpegts(src, video, {
-          onError: (msg) => { if (mounted) setError(msg) },
-        })
-        if (!mounted) { handle.destroy(); return }
-        engineRef.current = handle
-      }
-
-      // Attempt autoplay; fallback to muted autoplay on mobile if browser blocks audio autoplay
-      video.play().catch((err: unknown) => {
-        if (err instanceof Error && err.name === 'NotAllowedError') {
-          video.muted = true
-          setMuted(true)
-          void video.play().catch(() => {})
+          })
+          if (!mounted) { handle.destroy(); return }
+          engineRef.current = handle
+        } else {
+          const handle = await attachMpegts(src, video, {
+            onError: (msg) => { if (mounted) { setError(msg); setLoading(false) } },
+          })
+          if (!mounted) { handle.destroy(); return }
+          engineRef.current = handle
         }
-      })
+
+        // Attempt autoplay; fallback to muted autoplay on mobile if browser blocks audio autoplay
+        video.play().catch((err: unknown) => {
+          if (err instanceof Error && err.name === 'NotAllowedError') {
+            video.muted = true
+            setMuted(true)
+            void video.play().catch(() => {})
+          }
+        })
+      } catch (err: unknown) {
+        if (!mounted) return
+        const msg = err instanceof Error ? err.message : 'Failed to initialize player engine'
+        setError(msg)
+        setLoading(false)
+      }
     }
 
     void setup()
 
+    // Stall watchdog: If player stays loading while playing for > 12s, nudge or recover
+    const stallWatchdog = setInterval(() => {
+      if (!video || !mounted) return
+      if (loading && !error && !video.paused && video.currentTime > 0) {
+        video.currentTime += 0.1
+      }
+    }, 6000)
+
     return () => {
       mounted = false
+      clearInterval(stallWatchdog)
       engineRef.current?.destroy()
       engineRef.current = null
       video.src = ''
@@ -157,6 +175,7 @@ export default function Player({
     const onDurationChange = () => setDuration(video.duration || 0)
     const onTimeUpdate = () => {
       setCurrentTime(video.currentTime)
+      if (loading) setLoading(false)
       onPositionChange?.(video.currentTime)
       if (video.buffered.length) {
         setBuffered(video.buffered.end(video.buffered.length - 1))

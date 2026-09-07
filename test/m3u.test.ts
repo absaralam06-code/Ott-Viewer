@@ -172,5 +172,42 @@ http://example.com/live/index.mpd
     type: 'clearkey',
     licenseUrl: 'https://hotstarlicenceurl.cstds.workers.dev/plugx',
   })
+  assert.equal(entries[0].headers?.userAgent, 'Hotstar')
 })
+
+test('strips enclosing quotes from license_key and preserves URL without colon splitting', () => {
+  const m3u = `#EXTM3U
+#EXTINF:-1,Sony Ten 3 HD Hindi
+#KODIPROP:inputstream.adaptive.license_type=clearkey
+#KODIPROP:inputstream.adaptive.license_key="https://jiotv.live/license|User-Agent=plaYtv"
+https://live.jiotv.com/bpk-tv/Sony_Ten_3_HD/Fallback/index.mpd
+`
+  const { entries } = parseM3U(m3u)
+  assert.equal(entries.length, 1)
+  assert.deepEqual(entries[0].drm, {
+    type: 'clearkey',
+    licenseUrl: 'https://jiotv.live/license',
+  })
+  assert.equal(entries[0].headers?.userAgent, 'plaYtv')
+})
+
+test('parses JSON format ClearKeys from license_key', () => {
+  const m3u = `#EXTM3U
+#EXTINF:-1,Sample JSON DRM
+#KODIPROP:inputstream.adaptive.license_type=clearkey
+#KODIPROP:inputstream.adaptive.license_key={"keys":[{"kty":"oct","k":"eab6217aac6f1feec103120e6218eb43","kid":"c6255706bca250079aeaf1fc4474d1b9"}]}
+http://example.com/live/index.mpd
+`
+  const { entries } = parseM3U(m3u)
+  assert.equal(entries.length, 1)
+  assert.deepEqual(entries[0].drm, {
+    type: 'clearkey',
+    keyId: 'c6255706bca250079aeaf1fc4474d1b9',
+    key: 'eab6217aac6f1feec103120e6218eb43',
+    clearKeys: {
+      c6255706bca250079aeaf1fc4474d1b9: 'eab6217aac6f1feec103120e6218eb43',
+    },
+  })
+})
+
 

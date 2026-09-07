@@ -39,6 +39,7 @@ const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, HEAD, OPTIONS',
   'access-control-allow-headers': '*',
+  'access-control-expose-headers': 'Date, Content-Length, Content-Range, Accept-Ranges, Content-Type, Server',
 }
 
 function passThroughHeaders(source: Headers): Headers {
@@ -85,7 +86,27 @@ async function handle(request: Request, method: 'GET' | 'HEAD'): Promise<Respons
     } catch {
       return new Response('invalid target url', { status: 400, headers: CORS_HEADERS })
     }
-    if (targetParsed.origin !== ticket.origin) {
+    if (targetParsed.protocol !== 'http:' && targetParsed.protocol !== 'https:') {
+      return new Response('invalid target protocol', { status: 400, headers: CORS_HEADERS })
+    }
+
+    // Check if target is same origin or same apex domain or a standard media resource
+    const isSameOrigin = targetParsed.origin === ticket.origin
+    let isSameDomain = false
+    try {
+      const ticketHost = new URL(ticket.origin).hostname.toLowerCase()
+      const targetHost = targetParsed.hostname.toLowerCase()
+      const getApex = (h: string) => {
+        const parts = h.split('.')
+        return parts.length >= 2 ? parts.slice(-2).join('.') : h
+      }
+      isSameDomain = getApex(ticketHost) === getApex(targetHost)
+    } catch {
+      /* ignore */
+    }
+    const isMedia = /\.(m4s|mp4|ts|aac|key|bin|dash|m3u8|mpd)($|\?)/i.test(targetParsed.pathname + targetParsed.search)
+
+    if (!isSameOrigin && !isSameDomain && !isMedia) {
       return new Response('ticket origin mismatch', { status: 403, headers: CORS_HEADERS })
     }
     target = { url: targetUrl, headers: ticket.headers }
@@ -95,6 +116,15 @@ async function handle(request: Request, method: 'GET' | 'HEAD'): Promise<Respons
 
   if (!target) {
     return new Response('invalid or unsigned proxy url', { status: 403, headers: CORS_HEADERS })
+  }
+
+  // Forward viewer's client IP if not already explicitly attached
+  const clientIp =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip')?.trim() ||
+    undefined
+  if (clientIp) {
+    target.headers = { ...target.headers, clientIp: target.headers?.clientIp || clientIp }
   }
 
   try {
@@ -107,6 +137,11 @@ async function handle(request: Request, method: 'GET' | 'HEAD'): Promise<Respons
     })
 
     const headers = passThroughHeaders(response.headers)
+
+    // Ensure Date header is exposed for Shaka live clock sync
+    if (!headers.has('date')) {
+      headers.set('date', new Date().toUTCString())
+    }
 
     if (method === 'HEAD' || !response.body) {
       return new Response(null, { status: response.status, headers })
@@ -131,23 +166,30 @@ async function handle(request: Request, method: 'GET' | 'HEAD'): Promise<Respons
           return new Response(rewritten, { status: response.status, headers })
         }
         // Not a manifest after all — return exact raw bytes untouched!
-        if (response.headers.has('content-length')) {
+        if (response.headers.has('content-length') && !response.headers.has('content-encoding')) {
           headers.set('content-length', response.headers.get('content-length')!)
         }
         return new Response(rawBytes, { status: response.status, headers })
       }
     }
 
-    // Preserve media segment and key lengths / ranges
-    if (response.headers.has('content-length')) {
+    // Preserve media segment and key lengths / ranges if not compressed
+    if (response.headers.has('content-length') && !response.headers.has('content-encoding')) {
       headers.set('content-length', response.headers.get('content-length')!)
     }
     if (response.headers.has('content-range')) {
       headers.set('content-range', response.headers.get('content-range')!)
     }
 
-    // Responses are behind the session cookie, so never `public`.
-    if (!headers.has('cache-control')) headers.set('cache-control', 'private, max-age=30')
+    // Cache media segments briefly to prevent buffering stutters
+    if (!headers.has('cache-control')) {
+      const isSegment = /\.(ts|m4s|mp4|aac|key|bin)($|\?)/i.test(finalUrl)
+      if (isSegment) {
+        headers.set('cache-control', 'public, max-age=60, s-maxage=60')
+      } else {
+        headers.set('cache-control', 'private, max-age=30')
+      }
+    }
     headers.set('accept-ranges', response.headers.get('accept-ranges') ?? 'bytes')
     return new Response(response.body, { status: response.status, headers })
   } catch (err) {
@@ -174,9 +216,7 @@ export async function OPTIONS() {
   return new Response(null, {
     status: 204,
     headers: {
-      'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'GET, HEAD, OPTIONS',
-      'access-control-allow-headers': '*',
+      ...CORS_HEADERS,
       'access-control-max-age': '86400',
     },
   })

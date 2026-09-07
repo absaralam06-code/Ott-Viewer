@@ -228,11 +228,59 @@ export function parseM3U(text: string): ParsedPlaylist {
         const eq = prop.indexOf('=')
         if (eq > 0) {
           const k = prop.slice(0, eq).trim().toLowerCase()
-          const v = prop.slice(eq + 1).trim()
+          let v = prop.slice(eq + 1).trim()
+          if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+            v = v.slice(1, -1).trim()
+          }
           if (k === 'inputstream.adaptive.license_key') {
-            if (v.startsWith('http://') || v.startsWith('https://')) {
+            if (v.startsWith('{')) {
+              try {
+                const parsed = JSON.parse(v)
+                if (parsed.keys && Array.isArray(parsed.keys)) {
+                  const clearKeys: Record<string, string> = {}
+                  for (const item of parsed.keys) {
+                    if (item.kid && item.k) {
+                      const cleanKid = String(item.kid).trim().replace(/-/g, '').toLowerCase()
+                      const cleanKey = String(item.k).trim().replace(/-/g, '').toLowerCase()
+                      clearKeys[cleanKid] = cleanKey
+                    }
+                  }
+                  if (Object.keys(clearKeys).length) {
+                    const firstKid = Object.keys(clearKeys)[0]
+                    pendingDrm = {
+                      type: 'clearkey',
+                      keyId: firstKid,
+                      key: clearKeys[firstKid],
+                      clearKeys,
+                    }
+                  }
+                } else if (typeof parsed === 'object') {
+                  const clearKeys: Record<string, string> = {}
+                  for (const [keyId, key] of Object.entries(parsed)) {
+                    if (typeof key === 'string') {
+                      clearKeys[keyId.trim().replace(/-/g, '').toLowerCase()] = key.trim().replace(/-/g, '').toLowerCase()
+                    }
+                  }
+                  if (Object.keys(clearKeys).length) {
+                    const firstKid = Object.keys(clearKeys)[0]
+                    pendingDrm = {
+                      type: 'clearkey',
+                      keyId: firstKid,
+                      key: clearKeys[firstKid],
+                      clearKeys,
+                    }
+                  }
+                }
+              } catch {}
+            } else if (v.startsWith('http://') || v.startsWith('https://')) {
               const pipe = v.indexOf('|')
               const url = pipe === -1 ? v : v.slice(0, pipe).trim()
+              if (pipe !== -1) {
+                const pipeParams = v.slice(pipe + 1).trim()
+                for (const pair of pipeParams.split('&')) {
+                  applyOption(pendingHeaders, pair)
+                }
+              }
               pendingDrm = {
                 type: 'clearkey',
                 licenseUrl: url,
