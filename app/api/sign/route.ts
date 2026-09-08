@@ -5,6 +5,7 @@ import type { StreamHeaders } from '@/lib/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const preferredRegion = 'bom1'
 
 /**
  * Mint a signed `/api/stream` URL for one stream, on demand at playback time.
@@ -44,6 +45,7 @@ export async function POST(request: Request) {
   if (pipeIdx !== -1) {
     const pipeParams = streamUrl.slice(pipeIdx + 1).trim()
     streamUrl = streamUrl.slice(0, pipeIdx).trim()
+    if (streamUrl.endsWith('?')) streamUrl = streamUrl.slice(0, -1)
     for (const pair of pipeParams.split('&')) {
       const eq = pair.indexOf('=')
       if (eq > 0) {

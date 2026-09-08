@@ -14,6 +14,7 @@ import type { ProxyTarget } from '@/lib/proxy'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const preferredRegion = 'bom1'
 /**
  * Serverless platforms cap function duration (60s on Vercel Hobby).
  * HLS and DASH are unaffected because each segment is its own short request.

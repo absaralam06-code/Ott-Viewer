@@ -353,17 +353,67 @@ export function rewriteMpdManifest(xml: string, finalUrl: string): string {
     )
   }
 
-  // Inject ClearKey ContentProtection if cenc is present and clearkey is missing
+  // Inject ClearKey ContentProtection with valid PSSH box if cenc is present and clearkey is missing
   if (
     updated.includes('urn:mpeg:dash:mp4protection:2011') &&
     !updated.includes('1077efec-c0b2-4d02-ace3-3c1e52e2fb4b')
   ) {
+    const globalKid = extractKidFromXml(updated)
+    const fallbackPssh = globalKid ? createClearKeyPssh(globalKid) : ''
+
     updated = updated.replace(
       /(<ContentProtection\b[^>]*\burn:mpeg:dash:mp4protection:2011\b[^>]*\/?>)/gi,
-      `$1\n        <ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b"/>`,
+      (match) => {
+        const localKidMatch = match.match(/\b(?:cenc:)?default_KID="([A-Fa-f0-9-]+)"/i)
+        const pssh = localKidMatch ? createClearKeyPssh(localKidMatch[1]) : fallbackPssh
+        if (pssh) {
+          return `${match}\n        <ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b">\n          <cenc:pssh xmlns:cenc="urn:mpeg:cenc:2013">${pssh}</cenc:pssh>\n        </ContentProtection>`
+        }
+        return `${match}\n        <ContentProtection schemeIdUri="urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b"/>`
+      },
     )
   }
   return updated
+}
+
+/**
+ * Synthesizes a valid ISO/IEC 23001-7 Version 1 PSSH box for the W3C ClearKey CDM
+ * (SystemID: 1077efec-c0b2-4d02-ace3-3c1e52e2fb4b).
+ */
+export function createClearKeyPssh(kidHexOrUuid: string): string {
+  const cleanKid = kidHexOrUuid.replace(/[^0-9a-f]/gi, '').toLowerCase()
+  if (cleanKid.length !== 32) return ''
+  const kidBuf = Buffer.from(cleanKid, 'hex')
+  const systemIdBuf = Buffer.from('1077efecc0b24d02ace33c1e52e2fb4b', 'hex')
+  const pssh = Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x34]), // 52 bytes total box size
+    Buffer.from('pssh'),
+    Buffer.from([0x01, 0x00, 0x00, 0x00]), // version 1, flags 0
+    systemIdBuf,
+    Buffer.from([0x00, 0x00, 0x00, 0x01]), // 1 KID
+    kidBuf,
+    Buffer.from([0x00, 0x00, 0x00, 0x00]), // data size: 0
+  ])
+  return pssh.toString('base64')
+}
+
+function extractKidFromXml(xml: string): string | undefined {
+  const kidMatch = xml.match(/\b(?:cenc:)?default_KID="([A-Fa-f0-9-]+)"/i)
+  if (kidMatch) return kidMatch[1]
+  // Fallback: extract from Widevine PSSH box if present (tag 0x12, 0x10)
+  const wvMatch = xml.match(/<cenc:pssh[^>]*>([^<]+)<\/cenc:pssh>/i)
+  if (wvMatch) {
+    try {
+      const buf = Buffer.from(wvMatch[1].trim(), 'base64')
+      const tagIdx = buf.indexOf(Buffer.from([0x12, 0x10]))
+      if (tagIdx !== -1 && buf.length >= tagIdx + 18) {
+        return buf.slice(tagIdx + 2, tagIdx + 18).toString('hex')
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return undefined
 }
 
 /**

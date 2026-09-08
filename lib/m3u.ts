@@ -323,6 +323,7 @@ export function parseM3U(text: string): ParsedPlaylist {
     const pipeIdx = line.indexOf('|')
     if (pipeIdx !== -1) {
       url = line.slice(0, pipeIdx).trim()
+      if (url.endsWith('?')) url = url.slice(0, -1)
       const pipeParams = line.slice(pipeIdx + 1).trim()
       for (const pair of pipeParams.split('&')) {
         const p = pair.indexOf('=')

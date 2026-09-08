@@ -11,6 +11,7 @@ import {
   rewriteHlsManifest,
   isMpdManifest,
   rewriteMpdManifest,
+  createClearKeyPssh,
   redactUrl,
   buildUpstreamHeaders,
   assertAllowedTarget,
@@ -275,5 +276,37 @@ test('rewriteHlsManifest preserves query authentication tokens on relative segme
     assert.ok(decoded?.url.includes('token=xyz123'))
   }
 })
+
+test('createClearKeyPssh synthesizes a valid ISO 23001-7 Version 1 ClearKey PSSH box', () => {
+  const kid = 'C57BD6CB-156C-47C1-BF86-A6C4171D0000'
+  const pssh = createClearKeyPssh(kid)
+  assert.ok(pssh)
+  const buf = Buffer.from(pssh, 'base64')
+  assert.equal(buf.readUInt32BE(0), 52) // 52 bytes
+  assert.equal(buf.toString('utf8', 4, 8), 'pssh')
+  assert.equal(buf.readUInt8(8), 1) // version 1
+  assert.equal(buf.toString('hex', 12, 28), '1077efecc0b24d02ace33c1e52e2fb4b') // ClearKey UUID
+  assert.equal(buf.readUInt32BE(28), 1) // 1 KID
+  assert.equal(buf.toString('hex', 32, 48), 'c57bd6cb156c47c1bf86a6c4171d0000') // cleaned KID
+})
+
+test('rewriteMpdManifest synthesizes ClearKey ContentProtection with cenc:pssh from cenc:default_KID', () => {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011">
+  <Period start="PT0.000S" id="1">
+    <AdaptationSet id="1" mimeType="video/mp4">
+      <Representation id="1" width="320" height="180">
+        <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc" cenc:default_KID="C57BD6CB-156C-47C1-BF86-A6C4171D0000" xmlns:cenc="urn:mpeg:cenc:2013"/>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>`
+
+  const rewritten = rewriteMpdManifest(xml, 'https://livetv.hotstar.com/live/index.mpd')
+  assert.ok(rewritten.includes('urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b'))
+  assert.ok(rewritten.includes('<cenc:pssh xmlns:cenc="urn:mpeg:cenc:2013">'))
+  assert.ok(rewritten.includes('AAAANHBzc2gBAAAAEHfv7MCyTQKs4zweUuL7SwAAAAHFe9bLFWxHwb+GpsQXHQAAAAAAAA=='))
+})
+
 
 

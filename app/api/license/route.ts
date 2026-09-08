@@ -4,6 +4,7 @@ import { assertAllowedTarget, DEFAULT_USER_AGENT, ProxyError, redactUrl } from '
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const preferredRegion = 'bom1'
 
 const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-origin': '*',
@@ -100,14 +101,31 @@ async function handleLicense(request: Request, method: 'GET' | 'POST') {
     const data = await upstreamRes.arrayBuffer()
     const resContentType = upstreamRes.headers.get('content-type') || 'application/json'
 
-    // Unwrap ClearKey keys if wrapped inside base64 object (e.g. JokerTV format: { base64: { keys: [...] } })
+    // Normalize ClearKey keys (unwrap base64 wrapper if present, convert 32-char hex to base64url)
     try {
       const text = new TextDecoder('utf-8').decode(data)
       const parsed = JSON.parse(text)
-      if (parsed.base64 && Array.isArray(parsed.base64.keys)) {
+      const keysList = Array.isArray(parsed?.keys)
+        ? parsed.keys
+        : Array.isArray(parsed?.base64?.keys)
+        ? parsed.base64.keys
+        : null
+      if (keysList) {
+        const hexToBase64Url = (str: unknown) => {
+          if (typeof str === 'string' && str.length === 32 && /^[0-9a-f]+$/i.test(str)) {
+            return Buffer.from(str, 'hex').toString('base64url')
+          }
+          return typeof str === 'string' ? str : ''
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const normalizedKeys = keysList.map((item: any) => ({
+          ...item,
+          kid: hexToBase64Url(item.kid),
+          k: hexToBase64Url(item.k),
+        }))
         const unwrapped = JSON.stringify({
-          keys: parsed.base64.keys,
-          type: parsed.base64.type || 'temporary',
+          keys: normalizedKeys,
+          type: parsed.type || parsed.base64?.type || 'temporary',
         })
         return new NextResponse(unwrapped, {
           status: 200,

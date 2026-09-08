@@ -280,8 +280,10 @@ export async function attachShaka(
     }
   }
 
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+
   if (options.drm?.licenseUrl) {
-    const licenseEndpoint = `/api/license?url=${encodeURIComponent(options.drm.licenseUrl)}`
+    const licenseEndpoint = `${origin}/api/license?url=${encodeURIComponent(options.drm.licenseUrl)}`
     player.configure({
       drm: {
         servers: {
@@ -292,10 +294,11 @@ export async function attachShaka(
 
     // Pre-fetch keys to populate clearKeys in Shaka, which forces ClearKey CDM and overrides Widevine
     try {
+      const kidToFetch = options.drm?.keyId
       const res = await fetch(licenseEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body: kidToFetch ? JSON.stringify({ kids: [kidToFetch] }) : '{}',
       })
       if (res.ok) {
         const text = await res.text()
@@ -377,18 +380,18 @@ export async function attachShaka(
         if (
           !uri.startsWith('/api/stream') &&
           !uri.startsWith('/api/license') &&
-          !uri.startsWith(window.location.origin + '/api/stream') &&
-          !uri.startsWith(window.location.origin + '/api/license')
+          !uri.startsWith(origin + '/api/stream') &&
+          !uri.startsWith(origin + '/api/license')
         ) {
           request.uris = [
-            `/api/stream?t=${encodeURIComponent(ticket.t)}&ts=${encodeURIComponent(ticket.ts)}&u=${encodeURIComponent(uri)}`,
+            `${origin}/api/stream?t=${encodeURIComponent(ticket.t)}&ts=${encodeURIComponent(ticket.ts)}&u=${encodeURIComponent(uri)}`,
           ]
         }
       }
     })
   }
 
-  // Response filter to unwrap ClearKey keys if wrapped in base64
+  // Response filter to unwrap ClearKey keys if wrapped in base64 and normalize hex keys to base64url
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   player.getNetworkingEngine().registerResponseFilter((type: number, response: any) => {
     if (
@@ -399,10 +402,32 @@ export async function attachShaka(
       try {
         const text = shaka.util.StringUtils.fromUTF8(response.data)
         const parsed = JSON.parse(text)
-        if (parsed.base64 && Array.isArray(parsed.base64.keys)) {
+        const keysList = Array.isArray(parsed?.keys)
+          ? parsed.keys
+          : Array.isArray(parsed?.base64?.keys)
+          ? parsed.base64.keys
+          : null
+        if (keysList) {
+          const hexToBase64Url = (str: string) => {
+            if (typeof str === 'string' && str.length === 32 && /^[0-9a-f]+$/i.test(str)) {
+              try {
+                const bin = str.match(/.{2}/g)?.map((byte) => String.fromCharCode(parseInt(byte, 16))).join('') || ''
+                return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+              } catch {
+                return str
+              }
+            }
+            return str
+          }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const normalizedKeys = keysList.map((item: any) => ({
+            ...item,
+            kid: hexToBase64Url(item.kid),
+            k: hexToBase64Url(item.k),
+          }))
           const unwrapped = JSON.stringify({
-            keys: parsed.base64.keys,
-            type: parsed.base64.type || 'temporary',
+            keys: normalizedKeys,
+            type: parsed.type || parsed.base64?.type || 'temporary',
           })
           response.data = shaka.util.StringUtils.toUTF8(unwrapped)
         }
@@ -442,7 +467,8 @@ export async function attachShaka(
   }, 2000)
 
   try {
-    await player.load(src)
+    const absoluteSrc = src.startsWith('/') ? `${origin}${src}` : src
+    await player.load(absoluteSrc)
   } catch (err: unknown) {
     let msg = 'Failed to load stream in player'
     if (typeof err === 'object' && err !== null) {

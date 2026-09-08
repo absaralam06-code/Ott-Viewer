@@ -210,4 +210,18 @@ http://example.com/live/index.mpd
   })
 })
 
+test('strips trailing question mark before pipe parameter', () => {
+  const m3u = `
+#EXTM3U
+#EXTINF:-1,Channel With Question Mark Pipe
+https://example.com/stream/index.mpd?|cookie=foo=bar&referer=https://example.com/
+`
+  const { entries } = parseM3U(m3u)
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].url, 'https://example.com/stream/index.mpd')
+  assert.equal(entries[0].headers?.cookie, 'foo=bar')
+  assert.equal(entries[0].headers?.referer, 'https://example.com/')
+})
+
+
 
